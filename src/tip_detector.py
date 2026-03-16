@@ -94,7 +94,7 @@ class TipDetector:
         min_distance = distances[nearest_idx]
         
         # Tolerance for alignment (should be close to a grid point)
-        tolerance = self.grid_spacing['x'] * 0.3  # 30% of grid spacing
+        tolerance = self.grid_spacing['x'] * 0.4  # 40% of grid spacing
         
         is_aligned = min_distance < tolerance
         
