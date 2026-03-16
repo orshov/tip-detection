@@ -8,7 +8,7 @@ class TipDetector:
         self.detected_tips = []
     
     def detect(self, image):
-        """Detect tips by analyzing brightness differences and convexity"""
+        """Detect tips using Hough Circle Detection on difference image"""
         # Convert to grayscale
         gray_tips = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         gray_empty = cv2.cvtColor(self.empty_box, cv2.COLOR_BGR2GRAY)
@@ -17,40 +17,32 @@ class TipDetector:
         diff = gray_tips.astype(float) - gray_empty.astype(float)
         diff = np.clip(diff, 0, 255).astype(np.uint8)
         
-        # Apply threshold - only keep bright differences (tips are lighter)
-        _, thresh = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)
+        # Apply Gaussian blur for circle detection
+        blurred = cv2.GaussianBlur(diff, (9, 9), 2)
         
-        # Morphological operations to clean up
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
-        
-        # Find contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Detect circles using Hough Circle Detection
+        circles = cv2.HoughCircles(
+            blurred,
+            cv2.HOUGH_GRADIENT,
+            dp=1,
+            minDist=50,
+            param1=30,
+            param2=20,
+            minRadius=15,
+            maxRadius=35
+        )
         
         tips = []
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            
-            # Filter by size - tips should be similar size to holes
-            if 100 < area < 600:
-                # Fit circle to contour
-                (x, y), radius = cv2.minEnclosingCircle(contour)
-                
-                # Check circularity
-                perimeter = cv2.arcLength(contour, True)
-                if perimeter > 0:
-                    circularity = 4 * np.pi * area / (perimeter ** 2)
-                    
-                    # Good circles with high circularity
-                    if circularity > 0.6:
-                        tips.append({
-                            'x': int(x),
-                            'y': int(y),
-                            'radius': int(radius),
-                            'area': area,
-                            'circularity': circularity
-                        })
+        if circles is not None:
+            circles = np.uint16(np.around(circles))
+            for circle in circles[0, :]:
+                x, y, radius = circle
+                tips.append({
+                    'x': int(x),
+                    'y': int(y),
+                    'radius': int(radius),
+                    'area': np.pi * radius ** 2
+                })
         
         self.detected_tips = tips
         return tips
