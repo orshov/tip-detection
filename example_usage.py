@@ -1,19 +1,20 @@
-# Example Usage of TipDetector
+import cv2
+from src.tip_detector import TipDetector
 
-from tip_detector import TipDetector
+# Load image
+image = cv2.imread('data/test_images/tips_sample.bmp')
 
-# Initialize the TipDetector
-
-def main():
+if image is not None:
     detector = TipDetector()
+    tips = detector.detect(image)
     
-    # Example: Assuming you have a list of prices
-    prices = [100, 101, 99, 95, 102]
+    print(f"Detected {len(tips)} tips")
+    for i, tip in enumerate(tips):
+        print(f"Tip {i+1}: Position ({tip[0]}, {tip[1]}), Area: {tip[2]}")
     
-    # Detect tips
-    tips = detector.detect(prices)
-    
-    print("Detected Tips:", tips)
-
-if __name__ == '__main__':
-    main()
+    # Draw and save
+    result = detector.draw_results(image)
+    cv2.imwrite('output/detection_result.jpg', result)
+    print("Result saved to output/detection_result.jpg")
+else:
+    print("Image not found")
