@@ -62,43 +62,8 @@ class TipDetector:
             }
     
     def snap_to_grid(self, x, y):
-        """Find the nearest grid point and check if it's well-aligned"""
-        if self.grid_spacing is None:
-            return x, y, True
-        
-        # Get reference points from empty box
-        gray = cv2.cvtColor(self.empty_box, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
-        circles = cv2.HoughCircles(
-            blurred,
-            cv2.HOUGH_GRADIENT,
-            dp=1,
-            minDist=40,
-            param1=30,
-            param2=15,
-            minRadius=self.min_radius - 5,
-            maxRadius=self.max_radius + 5
-        )
-        
-        if circles is None:
-            return x, y, True
-        
-        circles = np.uint16(np.around(circles))
-        grid_points = circles[0, :]
-        
-        # Find nearest grid point
-        distances = np.sqrt((grid_points[:, 0] - x)**2 + (grid_points[:, 1] - y)**2)
-        nearest_idx = np.argmin(distances)
-        nearest_point = grid_points[nearest_idx]
-        
-        min_distance = distances[nearest_idx]
-        
-        # Tolerance for alignment (should be close to a grid point)
-        tolerance = self.grid_spacing['x'] * 0.35  # 35% of grid spacing
-        
-        is_aligned = min_distance < tolerance
-        
-        return int(nearest_point[0]), int(nearest_point[1]), is_aligned
+        """Placeholder - grid snapping disabled"""
+        return x, y, True
     
     def is_in_matrix(self, x, y):
         """Check if point is within matrix bounds"""
@@ -114,8 +79,8 @@ class TipDetector:
         gray_tips = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         gray_empty = cv2.cvtColor(self.empty_box, cv2.COLOR_BGR2GRAY)
         
-        # Find grid spacing and matrix bounds from the empty box
-        self.find_grid_spacing(self.empty_box)
+        # Find matrix bounds from the empty box
+        self.find_matrix_bounds(self.empty_box)
         
         # Compute difference - tips will be brighter
         diff = gray_tips.astype(float) - gray_empty.astype(float)
@@ -131,7 +96,7 @@ class TipDetector:
             dp=1,
             minDist=50,
             param1=30,
-            param2=18,  # Changed from 20 to 18
+            param2=20,
             minRadius=self.min_radius,
             maxRadius=self.max_radius
         )
@@ -146,22 +111,24 @@ class TipDetector:
                 if not self.is_in_matrix(x, y):
                     continue
                 
-                # Snap to nearest grid point and check alignment
-                snapped_x, snapped_y, is_aligned = self.snap_to_grid(x, y)
-                
-                # Only keep if well-aligned with grid
-                if not is_aligned:
-                    continue
-                
                 tips.append({
-                    'x': snapped_x,
-                    'y': snapped_y,
+                    'x': int(x),
+                    'y': int(y),
                     'radius': int(radius),
                     'area': np.pi * radius ** 2
                 })
         
-        self.detected_tips = tips
-        return tips
+        # Remove duplicates (same position)
+        unique_tips = []
+        seen_positions = set()
+        for tip in tips:
+            pos_key = (tip['x'], tip['y'])
+            if pos_key not in seen_positions:
+                unique_tips.append(tip)
+                seen_positions.add(pos_key)
+        
+        self.detected_tips = unique_tips
+        return unique_tips
     
     def draw_results(self, image):
         """Draw detected tips on image"""
