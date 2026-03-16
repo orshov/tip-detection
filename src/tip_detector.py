@@ -1,11 +1,15 @@
 import cv2
 import numpy as np
+from datetime import datetime
+import os
 
 class TipDetector:
-    def __init__(self, empty_box_path):
+    def __init__(self, empty_box_path, min_radius=15, max_radius=35):
         """Initialize with reference empty box image"""
         self.empty_box = cv2.imread(empty_box_path)
         self.detected_tips = []
+        self.min_radius = min_radius
+        self.max_radius = max_radius
     
     def detect(self, image):
         """Detect tips using Hough Circle Detection on difference image"""
@@ -28,8 +32,8 @@ class TipDetector:
             minDist=50,
             param1=30,
             param2=20,
-            minRadius=15,
-            maxRadius=35
+            minRadius=self.min_radius,
+            maxRadius=self.max_radius
         )
         
         tips = []
@@ -60,3 +64,17 @@ class TipDetector:
             # Draw center point
             cv2.circle(result, (x, y), 3, (0, 0, 255), -1)
         return result
+    
+    def save_result(self, image, output_dir='output', prefix='detection'):
+        """Save detection result with unique timestamp filename"""
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{prefix}_{timestamp}.jpg"
+        filepath = os.path.join(output_dir, filename)
+        
+        result = self.draw_results(image)
+        cv2.imwrite(filepath, result)
+        
+        return filepath
