@@ -75,9 +75,9 @@ class TipDetector:
         return (self.matrix_bounds['min_x'] <= x <= self.matrix_bounds['max_x'] and
                 self.matrix_bounds['min_y'] <= y <= self.matrix_bounds['max_y'])
     
-    def refine_center_with_brightness(self, diff_image, x, y, radius):
-        """Refine circle center by finding the brightest point in the region"""
-        margin = int(radius * 1.5)
+    def refine_center_with_circle_fit(self, diff_image, x, y, radius):
+        """Refine circle center by fitting a circle to the bright region"""
+        margin = int(radius * 2)
         x1 = max(0, int(x - margin))
         y1 = max(0, int(y - margin))
         x2 = min(diff_image.shape[1], int(x + margin))
@@ -85,13 +85,28 @@ class TipDetector:
         
         roi = diff_image[y1:y2, x1:x2]
         
-        if roi.size == 0 or roi.max() == 0:
+        if roi.size == 0:
             return float(x), float(y)
         
-        # Find the brightest point (tip center) in the ROI
-        y_local, x_local = np.unravel_index(roi.argmax(), roi.shape)
-        refined_x = float(x1 + x_local)
-        refined_y = float(y1 + y_local)
+        # Threshold to get bright pixels (tip region)
+        threshold = int(roi.max() * 0.4)
+        _, binary = cv2.threshold(roi, threshold, 255, cv2.THRESH_BINARY)
+        
+        # Find contours
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            return float(x), float(y)
+        
+        # Get largest contour (the tip)
+        largest_contour = max(contours, key=cv2.contourArea)
+        
+        # Fit circle to contour
+        (cx, cy), fitted_radius = cv2.minEnclosingCircle(largest_contour)
+        
+        # Convert back to original image coordinates
+        refined_x = float(x1 + cx)
+        refined_y = float(y1 + cy)
         
         return refined_x, refined_y
 
@@ -133,8 +148,8 @@ class TipDetector:
                 if not self.is_in_matrix(x, y):
                     continue
                 
-                # Refine center position using brightness
-                refined_x, refined_y = self.refine_center_with_brightness(diff, x, y, radius)
+                # Refine center position by fitting circle to bright region
+                refined_x, refined_y = self.refine_center_with_circle_fit(diff, x, y, radius)
                 
                 tips.append({
                     'x': refined_x,
