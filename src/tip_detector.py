@@ -11,13 +11,19 @@ class TipDetector:
         self.min_radius = min_radius
         self.max_radius = max_radius
         self.matrix_bounds = None
-    
-    def find_matrix_bounds(self, image):
-        """Find the boundaries of the tip matrix by detecting the grid"""
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        self.grid_points = None
+        self.grid_spacing = None
+        self.hole_radius = None
         
-        # Find all circles (both empty and with tips)
+        # Build grid from empty box
+        self.build_grid_from_empty_box()
+    
+    def build_grid_from_empty_box(self):
+        """Build a grid of expected hole positions from the empty box"""
+        gray = cv2.cvtColor(self.empty_box, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+        
+        # Detect all holes in empty box
         circles = cv2.HoughCircles(
             blurred,
             cv2.HOUGH_GRADIENT,
@@ -31,17 +37,43 @@ class TipDetector:
         
         if circles is not None:
             circles = np.uint16(np.around(circles))
-            x_coords = circles[0, :, 0]
-            y_coords = circles[0, :, 1]
             
-            # Add padding
+            # Store grid points and calculate average hole radius
+            self.grid_points = circles[0, :, :2]  # x, y coordinates
+            self.hole_radius = int(np.median(circles[0, :, 2]))
+            
+            # Calculate grid spacing
+            x_coords = self.grid_points[:, 0]
+            x_sorted = np.sort(x_coords)
+            x_diffs = np.diff(x_sorted)
+            x_diffs = x_diffs[x_diffs > 10]
+            self.grid_spacing = np.median(x_diffs)
+            
+            # Set matrix bounds
             padding = self.max_radius + 20
             self.matrix_bounds = {
                 'min_x': int(x_coords.min()) - padding,
                 'max_x': int(x_coords.max()) + padding,
-                'min_y': int(y_coords.min()) - padding,
-                'max_y': int(y_coords.max()) + padding
+                'min_y': int(self.grid_points[:, 1].min()) - padding,
+                'max_y': int(self.grid_points[:, 1].max()) + padding
             }
+    
+    def find_nearest_grid_point(self, x, y):
+        """Find the nearest grid point and check if within tolerance"""
+        if self.grid_points is None:
+            return None, None, False
+        
+        distances = np.sqrt((self.grid_points[:, 0] - x)**2 + (self.grid_points[:, 1] - y)**2)
+        min_idx = np.argmin(distances)
+        min_distance = distances[min_idx]
+        
+        tolerance = self.grid_spacing * 0.25  # 25% of grid spacing
+        
+        if min_distance < tolerance:
+            grid_x, grid_y = self.grid_points[min_idx]
+            return grid_x, grid_y, True
+        
+        return None, None, False
     
     def is_in_matrix(self, x, y):
         """Check if point is within matrix bounds"""
@@ -50,97 +82,12 @@ class TipDetector:
         
         return (self.matrix_bounds['min_x'] <= x <= self.matrix_bounds['max_x'] and
                 self.matrix_bounds['min_y'] <= y <= self.matrix_bounds['max_y'])
-    
-    def refine_circle_center(self, image, x, y, radius):
-        """Refine circle center using contour fitting for sub-pixel accuracy"""
-        # Extract region around detected circle
-        margin = radius + 10
-        x1 = max(0, int(x - margin))
-        y1 = max(0, int(y - margin))
-        x2 = min(image.shape[1], int(x + margin))
-        y2 = min(image.shape[0], int(y + margin))
-        
-        roi = image[y1:y2, x1:x2]
-        
-        if roi.size == 0:
-            return x, y
-        
-        # Convert to grayscale if needed
-        if len(roi.shape) == 3:
-            gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        else:
-            gray_roi = roi
-        
-        # Threshold to find circle boundary
-        _, thresh = cv2.threshold(gray_roi, 100, 255, cv2.THRESH_BINARY)
-        
-        # Find contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if contours:
-            # Get the largest contour
-            largest_contour = max(contours, key=cv2.contourArea)
-            
-            # Fit circle to contour
-            (cx, cy), fitted_radius = cv2.minEnclosingCircle(largest_contour)
-            
-            # Convert back to original image coordinates
-            refined_x = cx + x1
-            refined_y = cy + y1
-            
-            return refined_x, refined_y
-        
-        return x, y
-
-       def refine_circle_center(self, image, x, y, radius):
-        """Refine circle center using contour fitting for sub-pixel accuracy"""
-        # Extract region around detected circle
-        margin = radius + 10
-        x1 = max(0, int(x - margin))
-        y1 = max(0, int(y - margin))
-        x2 = min(image.shape[1], int(x + margin))
-        y2 = min(image.shape[0], int(y + margin))
-        
-        roi = image[y1:y2, x1:x2]
-        
-        if roi.size == 0:
-            return x, y
-        
-        # Convert to grayscale if needed
-        if len(roi.shape) == 3:
-            gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        else:
-            gray_roi = roi
-        
-        # Threshold to find circle boundary
-        _, thresh = cv2.threshold(gray_roi, 100, 255, cv2.THRESH_BINARY)
-        
-        # Find contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if contours:
-            # Get the largest contour
-            largest_contour = max(contours, key=cv2.contourArea)
-            
-            # Fit circle to contour
-            (cx, cy), fitted_radius = cv2.minEnclosingCircle(largest_contour)
-            
-            # Convert back to original image coordinates
-            refined_x = cx + x1
-            refined_y = cy + y1
-            
-            return refined_x, refined_y
-        
-        return x, y
 
     def detect(self, image):
         """Detect tips using Hough Circle Detection on difference image"""
         # Convert to grayscale
         gray_tips = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         gray_empty = cv2.cvtColor(self.empty_box, cv2.COLOR_BGR2GRAY)
-        
-        # Find matrix bounds from the empty box
-        self.find_matrix_bounds(self.empty_box)
         
         # Compute difference - tips will be brighter
         diff = gray_tips.astype(float) - gray_empty.astype(float)
@@ -171,33 +118,27 @@ class TipDetector:
                 if not self.is_in_matrix(x, y):
                     continue
                 
-                # Refine center position using contour fitting
-                refined_x, refined_y = self.refine_circle_center(image, x, y, radius)
+                # Snap to nearest grid point - only accept if close to grid
+                grid_x, grid_y, is_valid = self.find_nearest_grid_point(x, y)
+                
+                if not is_valid:
+                    continue  # Skip if not near a grid point (false positive)
                 
                 tips.append({
-                    'x': refined_x,
-                    'y': refined_y,
-                    'radius': int(radius),
-                    'area': np.pi * radius ** 2
+                    'x': float(grid_x),
+                    'y': float(grid_y),
+                    'radius': self.hole_radius,  # Use hole radius from empty box
+                    'area': np.pi * self.hole_radius ** 2
                 })
         
-        # Remove duplicates (same position within 5 pixels)
+        # Remove duplicates (snap to grid already does this, but be safe)
         unique_tips = []
-        seen_positions = []
+        seen_positions = set()
         for tip in tips:
-            pos = (tip['x'], tip['y'])
-            
-            # Check if position is too close to existing tip
-            is_duplicate = False
-            for seen_pos in seen_positions:
-                distance = np.sqrt((pos[0] - seen_pos[0])**2 + (pos[1] - seen_pos[1])**2)
-                if distance < 10:  # Within 10 pixels = duplicate
-                    is_duplicate = True
-                    break
-            
-            if not is_duplicate:
+            pos_key = (int(tip['x']), int(tip['y']))
+            if pos_key not in seen_positions:
                 unique_tips.append(tip)
-                seen_positions.append(pos)
+                seen_positions.add(pos_key)
         
         self.detected_tips = unique_tips
         return unique_tips
@@ -217,9 +158,9 @@ class TipDetector:
         
         # Draw detected tips
         for tip in self.detected_tips:
-            x = tip['x']
-            y = tip['y']
-            radius = tip['radius']
+            x = int(tip['x'])
+            y = int(tip['y'])
+            radius = int(tip['radius'])
             
             # Draw circle outline
             cv2.circle(result, (x, y), radius, (0, 255, 0), 2)
