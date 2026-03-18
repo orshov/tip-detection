@@ -86,38 +86,14 @@ class TipDetector:
         roi = diff_image[y1:y2, x1:x2]
         
         if roi.size == 0 or roi.max() == 0:
-            return x, y
+            return float(x), float(y)
         
         # Find the brightest point (tip center) in the ROI
         y_local, x_local = np.unravel_index(roi.argmax(), roi.shape)
-        refined_x = x1 + x_local
-        refined_y = y1 + y_local
+        refined_x = float(x1 + x_local)
+        refined_y = float(y1 + y_local)
         
         return refined_x, refined_y
-    
-    def is_likely_false_positive(self, diff_image, x, y, radius):
-        """Check if this detection is likely a false positive (between holes)"""
-        # Extract small region around center
-        margin = int(radius * 0.8)
-        x1 = max(0, int(x - margin))
-        y1 = max(0, int(y - margin))
-        x2 = min(diff_image.shape[1], int(x + margin))
-        y2 = min(diff_image.shape[0], int(y + margin))
-        
-        roi = diff_image[y1:y2, x1:x2]
-        
-        if roi.size == 0:
-            return True
-        
-        # False positives have very low signal
-        center_value = roi[len(roi)//2, len(roi[0])//2]
-        roi_max = roi.max()
-        
-        # If center is much weaker than max in region, likely false positive
-        if center_value < roi_max * 0.3:
-            return True
-        
-        return False
 
     def detect(self, image):
         """Detect tips using Hough Circle Detection on difference image"""
@@ -157,16 +133,12 @@ class TipDetector:
                 if not self.is_in_matrix(x, y):
                     continue
                 
-                # Filter: reject likely false positives
-                if self.is_likely_false_positive(diff, x, y, radius):
-                    continue
-                
                 # Refine center position using brightness
                 refined_x, refined_y = self.refine_center_with_brightness(diff, x, y, radius)
                 
                 tips.append({
-                    'x': int(refined_x),
-                    'y': int(refined_y),
+                    'x': refined_x,
+                    'y': refined_y,
                     'radius': self.hole_radius if self.hole_radius else int(radius),
                     'area': np.pi * (self.hole_radius if self.hole_radius else int(radius)) ** 2
                 })
