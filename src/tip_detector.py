@@ -75,9 +75,9 @@ class TipDetector:
         return (self.matrix_bounds['min_x'] <= x <= self.matrix_bounds['max_x'] and
                 self.matrix_bounds['min_y'] <= y <= self.matrix_bounds['max_y'])
     
-    def refine_center_with_adaptive_threshold(self, diff_image, x, y, radius):
-        """Refine center using adaptive thresholding to handle variable lighting"""
-        margin = int(radius * 2.5)
+    def refine_center_with_circle_fit(self, diff_image, x, y, radius):
+        """Refine circle center by fitting a circle to the bright region"""
+        margin = int(radius * 2)
         x1 = max(0, int(x - margin))
         y1 = max(0, int(y - margin))
         x2 = min(diff_image.shape[1], int(x + margin))
@@ -88,16 +88,9 @@ class TipDetector:
         if roi.size == 0:
             return float(x), float(y)
         
-        # Use adaptive thresholding to handle variable lighting
-        roi_uint8 = roi.astype(np.uint8)
-        if roi_uint8.max() > 0:
-            # Adaptive threshold - compare each pixel to local mean
-            binary = cv2.adaptiveThreshold(
-                roi_uint8, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                cv2.THRESH_BINARY, 11, 2
-            )
-        else:
-            return float(x), float(y)
+        # Threshold to get bright pixels (tip region) - use 30% of max
+        threshold = int(roi.max() * 0.3)
+        _, binary = cv2.threshold(roi, threshold, 255, cv2.THRESH_BINARY)
         
         # Find contours
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -108,13 +101,13 @@ class TipDetector:
         # Get largest contour (the tip)
         largest_contour = max(contours, key=cv2.contourArea)
         
-        # Get the moment (centroid) of the contour - more robust than circle fit
+        # Use centroid instead of circle fit - more stable
         M = cv2.moments(largest_contour)
         if M["m00"] > 0:
             cx = M["m10"] / M["m00"]
             cy = M["m01"] / M["m00"]
         else:
-            # Fallback to circle fit
+            # Fallback
             (cx, cy), _ = cv2.minEnclosingCircle(largest_contour)
         
         # Convert back to original image coordinates
@@ -124,8 +117,8 @@ class TipDetector:
         return refined_x, refined_y
     
     def is_false_positive(self, diff_image, x, y, radius):
-        """Check if detection is between two holes (false positive)"""
-        margin = int(radius * 1.2)
+        """Check if detection is likely a false positive (between holes)"""
+        margin = int(radius * 1.5)
         x1 = max(0, int(x - margin))
         y1 = max(0, int(y - margin))
         x2 = min(diff_image.shape[1], int(x + margin))
@@ -136,8 +129,8 @@ class TipDetector:
         if roi.size == 0:
             return True
         
-        # Very weak signal = likely false positive
-        if roi.max() < 20:
+        # Very weak signal = likely false positive (between holes artifact)
+        if roi.max() < 15:
             return True
         
         return False
@@ -184,8 +177,8 @@ class TipDetector:
                 if self.is_false_positive(diff, x, y, radius):
                     continue
                 
-                # Refine center position using adaptive thresholding
-                refined_x, refined_y = self.refine_center_with_adaptive_threshold(diff, x, y, radius)
+                # Refine center position using circle fit + centroid
+                refined_x, refined_y = self.refine_center_with_circle_fit(diff, x, y, radius)
                 
                 tips.append({
                     'x': refined_x,
