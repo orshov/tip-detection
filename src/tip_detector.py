@@ -75,8 +75,8 @@ class TipDetector:
         return (self.matrix_bounds['min_x'] <= x <= self.matrix_bounds['max_x'] and
                 self.matrix_bounds['min_y'] <= y <= self.matrix_bounds['max_y'])
     
-    def refine_center_with_watershed(self, diff_image, x, y, radius):
-        """Refine circle center using watershed to find the true tip center"""
+    def refine_center_with_brightness(self, diff_image, x, y, radius):
+        """Refine circle center by finding the brightest point in the region"""
         margin = int(radius * 1.5)
         x1 = max(0, int(x - margin))
         y1 = max(0, int(y - margin))
@@ -85,22 +85,20 @@ class TipDetector:
         
         roi = diff_image[y1:y2, x1:x2]
         
-        if roi.size == 0:
+        if roi.size == 0 or roi.max() == 0:
             return x, y
         
         # Find the brightest point (tip center) in the ROI
-        if roi.max() == 0:
-            return x, y
-        
         y_local, x_local = np.unravel_index(roi.argmax(), roi.shape)
         refined_x = x1 + x_local
         refined_y = y1 + y_local
         
         return refined_x, refined_y
     
-    def is_valid_tip_contrast(self, diff_image, x, y, radius):
-        """Check if detected circle has sufficient contrast with surroundings"""
-        margin = int(radius * 1.2)
+    def is_likely_false_positive(self, diff_image, x, y, radius):
+        """Check if this detection is likely a false positive (between holes)"""
+        # Extract small region around center
+        margin = int(radius * 0.8)
         x1 = max(0, int(x - margin))
         y1 = max(0, int(y - margin))
         x2 = min(diff_image.shape[1], int(x + margin))
@@ -109,14 +107,17 @@ class TipDetector:
         roi = diff_image[y1:y2, x1:x2]
         
         if roi.size == 0:
-            return False
+            return True
         
-        # Tip should have high brightness in center
-        center_brightness = roi[len(roi)//2, len(roi[0])//2]
-        roi_mean = roi.mean()
+        # False positives have very low signal
+        center_value = roi[len(roi)//2, len(roi[0])//2]
+        roi_max = roi.max()
         
-        # Center should be significantly brighter than surrounding area
-        return center_brightness > roi_mean * 1.5
+        # If center is much weaker than max in region, likely false positive
+        if center_value < roi_max * 0.3:
+            return True
+        
+        return False
 
     def detect(self, image):
         """Detect tips using Hough Circle Detection on difference image"""
@@ -156,12 +157,12 @@ class TipDetector:
                 if not self.is_in_matrix(x, y):
                     continue
                 
-                # Filter: check if this has valid tip contrast
-                if not self.is_valid_tip_contrast(diff, x, y, radius):
+                # Filter: reject likely false positives
+                if self.is_likely_false_positive(diff, x, y, radius):
                     continue
                 
-                # Refine center position
-                refined_x, refined_y = self.refine_center_with_watershed(diff, x, y, radius)
+                # Refine center position using brightness
+                refined_x, refined_y = self.refine_center_with_brightness(diff, x, y, radius)
                 
                 tips.append({
                     'x': int(refined_x),
