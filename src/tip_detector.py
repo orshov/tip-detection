@@ -74,6 +74,49 @@ class TipDetector:
         
         return (self.matrix_bounds['min_x'] <= x <= self.matrix_bounds['max_x'] and
                 self.matrix_bounds['min_y'] <= y <= self.matrix_bounds['max_y'])
+    
+    def refine_center_with_watershed(self, diff_image, x, y, radius):
+        """Refine circle center using watershed to find the true tip center"""
+        margin = int(radius * 1.5)
+        x1 = max(0, int(x - margin))
+        y1 = max(0, int(y - margin))
+        x2 = min(diff_image.shape[1], int(x + margin))
+        y2 = min(diff_image.shape[0], int(y + margin))
+        
+        roi = diff_image[y1:y2, x1:x2]
+        
+        if roi.size == 0:
+            return x, y
+        
+        # Find the brightest point (tip center) in the ROI
+        if roi.max() == 0:
+            return x, y
+        
+        y_local, x_local = np.unravel_index(roi.argmax(), roi.shape)
+        refined_x = x1 + x_local
+        refined_y = y1 + y_local
+        
+        return refined_x, refined_y
+    
+    def is_valid_tip_contrast(self, diff_image, x, y, radius):
+        """Check if detected circle has sufficient contrast with surroundings"""
+        margin = int(radius * 1.2)
+        x1 = max(0, int(x - margin))
+        y1 = max(0, int(y - margin))
+        x2 = min(diff_image.shape[1], int(x + margin))
+        y2 = min(diff_image.shape[0], int(y + margin))
+        
+        roi = diff_image[y1:y2, x1:x2]
+        
+        if roi.size == 0:
+            return False
+        
+        # Tip should have high brightness in center
+        center_brightness = roi[len(roi)//2, len(roi[0])//2]
+        roi_mean = roi.mean()
+        
+        # Center should be significantly brighter than surrounding area
+        return center_brightness > roi_mean * 1.5
 
     def detect(self, image):
         """Detect tips using Hough Circle Detection on difference image"""
@@ -113,9 +156,16 @@ class TipDetector:
                 if not self.is_in_matrix(x, y):
                     continue
                 
+                # Filter: check if this has valid tip contrast
+                if not self.is_valid_tip_contrast(diff, x, y, radius):
+                    continue
+                
+                # Refine center position
+                refined_x, refined_y = self.refine_center_with_watershed(diff, x, y, radius)
+                
                 tips.append({
-                    'x': int(x),
-                    'y': int(y),
+                    'x': int(refined_x),
+                    'y': int(refined_y),
                     'radius': self.hole_radius if self.hole_radius else int(radius),
                     'area': np.pi * (self.hole_radius if self.hole_radius else int(radius)) ** 2
                 })
