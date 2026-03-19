@@ -48,11 +48,20 @@ class TipDetector:
                     'area': np.pi * radius ** 2
                 })
         
-        # Snap tips to grid
-        unique_tips = self.snap_to_grid(unique_tips)
-        self.detected_tips = unique_tips
+        # Remove duplicates
+        unique_tips = []
+        seen = set()
+        for tip in tips:
+            pos = (round(tip['x']), round(tip['y']))
+            if pos not in seen:
+                unique_tips.append(tip)
+                seen.add(pos)
         
-        return tips
+        # Snap tips to grid
+        snapped_tips = self.snap_to_grid(unique_tips)
+        self.detected_tips = snapped_tips
+        
+        return snapped_tips
     
     def snap_to_grid(self, tips):
         """Snap detections to grid positions based on hole clustering"""
