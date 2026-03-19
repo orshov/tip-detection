@@ -135,9 +135,9 @@ class TipDetector:
         """Draw detected tips on image"""
         result = image.copy()
         for tip in self.detected_tips:
-            x = tip['x']
-            y = tip['y']
-            radius = tip['radius']
+            x = int(tip['x'])
+            y = int(tip['y'])
+            radius = int(tip['radius'])
             
             # Draw circle outline
             cv2.circle(result, (x, y), radius, (0, 255, 0), 2)
