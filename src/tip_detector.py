@@ -10,9 +10,91 @@ class TipDetector:
         self.detected_tips = []
         self.min_radius = min_radius
         self.max_radius = max_radius
+        self.hole_positions = []
     
+    def find_hole_grid(self, image):
+        """Detect hole positions in the empty box"""
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+        
+        circles = cv2.HoughCircles(
+            blurred,
+            cv2.HOUGH_GRADIENT,
+            dp=1,
+            minDist=40,
+            param1=30,
+            param2=15,
+            minRadius=15,
+            maxRadius=35
+        )
+        
+        self.hole_positions = []
+        if circles is not None:
+            circles = np.uint16(np.around(circles))
+            self.hole_positions = [(int(c[0]), int(c[1]), int(c[2])) for c in circles[0, :]]
+        
+        return self.hole_positions
+
+    def is_tip_in_hole(self, tip_x, tip_y, threshold=50):
+        """Check if a detected tip is close to an actual hole position"""
+        if not self.hole_positions:
+            return True
+        
+        # Find closest hole
+        min_distance = float('inf')
+        for hole_x, hole_y, hole_r in self.hole_positions:
+            distance = np.sqrt((tip_x - hole_x)**2 + (tip_y - hole_y)**2)
+            min_distance = min(min_distance, distance)
+        
+        # If within threshold of a hole, it's valid
+        return min_distance < threshold
+    
+    def snap_to_grid(self, tips):
+        """Snap detections to grid positions based on actual grid spacing"""
+        if not tips or len(tips) < 3:
+            return tips
+        
+        # Find the actual grid spacing by analyzing detected positions
+        xs = sorted(set([int(t['x']) for t in tips]))
+        ys = sorted(set([int(t['y']) for t in tips]))
+        
+        if len(xs) < 2 or len(ys) < 2:
+            return tips
+        
+        # Calculate average spacing
+        x_diffs = [xs[i+1] - xs[i] for i in range(len(xs)-1)]
+        y_diffs = [ys[i+1] - ys[i] for i in range(len(ys)-1)]
+        
+        x_spacing = int(np.median(x_diffs))
+        y_spacing = int(np.median(y_diffs))
+        
+        # Snap each tip to nearest grid point
+        snapped = []
+        seen = set()
+        
+        for tip in tips:
+            # Find nearest grid line
+            nearest_x = round(tip['x'] / x_spacing) * x_spacing
+            nearest_y = round(tip['y'] / y_spacing) * y_spacing
+            
+            # Avoid duplicates
+            pos = (nearest_x, nearest_y)
+            if pos not in seen:
+                snapped.append({
+                    'x': float(nearest_x),
+                    'y': float(nearest_y),
+                    'radius': tip['radius'],
+                    'area': tip['area']
+                })
+                seen.add(pos)
+        
+        return snapped
+
     def detect(self, image):
         """Detect tips using Hough Circle Detection on difference image"""
+        # Find hole grid from empty box first
+        self.find_hole_grid(self.empty_box)
+        
         # Convert to grayscale
         gray_tips = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         gray_empty = cv2.cvtColor(self.empty_box, cv2.COLOR_BGR2GRAY)
@@ -41,12 +123,15 @@ class TipDetector:
             circles = np.uint16(np.around(circles))
             for circle in circles[0, :]:
                 x, y, radius = circle
-                tips.append({
-                    'x': int(x),
-                    'y': int(y),
-                    'radius': int(radius),
-                    'area': np.pi * radius ** 2
-                })
+                
+                # Filter: only keep tips that are close to actual holes
+                if self.is_tip_in_hole(x, y, threshold=60):
+                    tips.append({
+                        'x': int(x),
+                        'y': int(y),
+                        'radius': int(radius),
+                        'area': np.pi * radius ** 2
+                    })
         
         # Remove duplicates
         unique_tips = []
@@ -62,74 +147,6 @@ class TipDetector:
         self.detected_tips = snapped_tips
         
         return snapped_tips
-    
-    def snap_to_grid(self, tips):
-        """Snap detections to grid positions based on hole clustering"""
-        if not tips or len(tips) < 2:
-            return tips
-        
-        # Group tips by approximate rows and columns
-        tolerance = 35  # pixels
-        
-        # Sort by y then x
-        tips_sorted = sorted(tips, key=lambda t: (t['y'], t['x']))
-        
-        # Group into rows
-        rows = []
-        current_row = []
-        last_y = None
-        
-        for tip in tips_sorted:
-            if last_y is None or abs(tip['y'] - last_y) < tolerance:
-                current_row.append(tip)
-            else:
-                if current_row:
-                    rows.append(current_row)
-                current_row = [tip]
-            last_y = tip['y']
-        
-        if current_row:
-            rows.append(current_row)
-        
-        # For each row, calculate average y and snap all tips in row
-        snapped = []
-        for row in rows:
-            avg_y = np.mean([t['y'] for t in row])
-            
-            # Sort row by x
-            row_sorted = sorted(row, key=lambda t: t['x'])
-            
-            # Group into columns
-            cols = []
-            current_col = []
-            last_x = None
-            
-            for tip in row_sorted:
-                if last_x is None or abs(tip['x'] - last_x) < tolerance:
-                    current_col.append(tip)
-                else:
-                    if current_col:
-                        cols.append(current_col)
-                    current_col = [tip]
-                last_x = tip['x']
-            
-            if current_col:
-                cols.append(current_col)
-            
-            # For each column, calculate average x and snap
-            for col in cols:
-                avg_x = np.mean([t['x'] for t in col])
-                
-                # Take first tip from column as template
-                template = col[0]
-                snapped.append({
-                    'x': avg_x,
-                    'y': avg_y,
-                    'radius': template['radius'],
-                    'area': template['area']
-                })
-        
-        return snapped
     
     def draw_results(self, image):
         """Draw detected tips on image"""
