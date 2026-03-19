@@ -48,8 +48,79 @@ class TipDetector:
                     'area': np.pi * radius ** 2
                 })
         
-        self.detected_tips = tips
+        # Snap tips to grid
+        unique_tips = self.snap_to_grid(unique_tips)
+        self.detected_tips = unique_tips
+        
         return tips
+    
+    def snap_to_grid(self, tips):
+        """Snap detections to grid positions based on hole clustering"""
+        if not tips or len(tips) < 2:
+            return tips
+        
+        # Group tips by approximate rows and columns
+        tolerance = 35  # pixels
+        
+        # Sort by y then x
+        tips_sorted = sorted(tips, key=lambda t: (t['y'], t['x']))
+        
+        # Group into rows
+        rows = []
+        current_row = []
+        last_y = None
+        
+        for tip in tips_sorted:
+            if last_y is None or abs(tip['y'] - last_y) < tolerance:
+                current_row.append(tip)
+            else:
+                if current_row:
+                    rows.append(current_row)
+                current_row = [tip]
+            last_y = tip['y']
+        
+        if current_row:
+            rows.append(current_row)
+        
+        # For each row, calculate average y and snap all tips in row
+        snapped = []
+        for row in rows:
+            avg_y = np.mean([t['y'] for t in row])
+            
+            # Sort row by x
+            row_sorted = sorted(row, key=lambda t: t['x'])
+            
+            # Group into columns
+            cols = []
+            current_col = []
+            last_x = None
+            
+            for tip in row_sorted:
+                if last_x is None or abs(tip['x'] - last_x) < tolerance:
+                    current_col.append(tip)
+                else:
+                    if current_col:
+                        cols.append(current_col)
+                    current_col = [tip]
+                last_x = tip['x']
+            
+            if current_col:
+                cols.append(current_col)
+            
+            # For each column, calculate average x and snap
+            for col in cols:
+                avg_x = np.mean([t['x'] for t in col])
+                
+                # Take first tip from column as template
+                template = col[0]
+                snapped.append({
+                    'x': avg_x,
+                    'y': avg_y,
+                    'radius': template['radius'],
+                    'area': template['area']
+                })
+        
+        return snapped
     
     def draw_results(self, image):
         """Draw detected tips on image"""
